@@ -10,7 +10,20 @@ from micropython import const
 _PACKAGE_INDEX = const("https://micropython.org/pi/v2")
 _CHUNK_SIZE = const(128)
 
-allowed_mip_url_prefixes = ("http://", "https://", "github:", "gitlab:")
+# Since all URLs are accessed via HTTPS, the URL scheme has to be omitted here.
+# The first three format parameters are assumed to be the organisation, the
+# repository names, and the branch/tag name, in this order.
+_HOSTS = {
+    # https://codeberg.org/api/v1/repos/{org}/{repo}/raw/{path}?ref={branch}
+    "codeberg:": "codeberg.org/api/v1/repos/{}/{}/raw/{p}?ref={}",
+    # https://raw.githubusercontent.com/{org}/{repo}/{branch}/{path}
+    "github:": "raw.githubusercontent.com/{}/{}/{}/{p}",
+    # https://gitlab.com/{org}/{repo}/-/raw/{branch}/{path}
+    "gitlab:": "gitlab.com/{}/{}/-/raw/{}/{p}",
+}
+
+# ruff: noqa: RUF005 - tuple construction with list destructuring is not supported.
+allowed_mip_url_prefixes = tuple(["http://", "https://"] + list(_HOSTS.keys()))
 
 
 # This implements os.makedirs(os.dirname(path))
@@ -62,31 +75,13 @@ def _check_exists(path, short_hash):
 
 
 def _rewrite_url(url, branch=None):
-    if not branch:
-        branch = "HEAD"
-    if url.startswith("github:"):
-        url = url[7:].split("/")
-        url = (
-            "https://raw.githubusercontent.com/"
-            + url[0]
-            + "/"
-            + url[1]
-            + "/"
-            + branch
-            + "/"
-            + "/".join(url[2:])
-        )
-    elif url.startswith("gitlab:"):
-        url = url[7:].split("/")
-        url = (
-            "https://gitlab.com/"
-            + url[0]
-            + "/"
-            + url[1]
-            + "/-/raw/"
-            + branch
-            + "/"
-            + "/".join(url[2:])
+    for provider, url_format in _HOSTS.items():
+        if not url.startswith(provider):
+            continue
+        components = url[len(provider) :].split("/")
+        # Add https:// prefix to final URL.
+        return allowed_mip_url_prefixes[1] + url_format.format(
+            components[0], components[1], branch or "HEAD", p="/".join(components[2:])
         )
     return url
 
